@@ -301,6 +301,7 @@ func resourceRelease() *schema.Resource {
 							Type:        schema.TypeString,
 							Computed:    true,
 							Description: "The raw yaml values used for the chart.",
+							Sensitive:   true,
 						},
 					},
 				},
