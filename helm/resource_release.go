@@ -269,6 +269,7 @@ func resourceRelease() *schema.Resource {
 			"metadata": {
 				Type:        schema.TypeList,
 				Computed:    true,
+				Sensitive:   true,
 				Description: "Status of the deployed release.",
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
@@ -301,7 +302,6 @@ func resourceRelease() *schema.Resource {
 							Type:        schema.TypeString,
 							Computed:    true,
 							Description: "The raw yaml values used for the chart.",
-							Sensitive:   true,
 						},
 					},
 				},
