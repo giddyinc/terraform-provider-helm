@@ -16,21 +16,47 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/postrender"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/strvals"
+
 	"sigs.k8s.io/yaml"
 )
 
-// ErrReleaseNotFound is the error when a Helm release is not found
-var ErrReleaseNotFound = errors.New("release not found")
+// errReleaseNotFound is the error when a Helm release is not found
+var errReleaseNotFound = errors.New("release not found")
+
+// defaultAttributes release attribute values
+var defaultAttributes = map[string]interface{}{
+	"verify":                     false,
+	"timeout":                    300,
+	"wait":                       true,
+	"disable_webhooks":           false,
+	"atomic":                     false,
+	"render_subchart_notes":      true,
+	"disable_openapi_validation": false,
+	"disable_crd_hooks":          false,
+	"force_update":               false,
+	"reset_values":               false,
+	"reuse_values":               false,
+	"recreate_pods":              false,
+	"max_history":                0,
+	"skip_crds":                  false,
+	"cleanup_on_fail":            false,
+	"dependency_update":          false,
+	"replace":                    false,
+}
 
 func resourceRelease() *schema.Resource {
 	return &schema.Resource{
-		Create:        resourceReleaseCreate,
-		Read:          resourceReleaseRead,
-		Delete:        resourceReleaseDelete,
-		Update:        resourceReleaseUpdate,
-		Exists:        resourceReleaseExists,
+		Create: resourceReleaseCreate,
+		Read:   resourceReleaseRead,
+		Delete: resourceReleaseDelete,
+		Update: resourceReleaseUpdate,
+		Exists: resourceReleaseExists,
+		Importer: &schema.ResourceImporter{
+			State: resourceHelmReleaseImportState,
+		},
 		CustomizeDiff: resourceDiff,
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -73,7 +99,7 @@ func resourceRelease() *schema.Resource {
 			"chart": {
 				Type:        schema.TypeString,
 				Required:    true,
-				Description: "Chart name to be installed.",
+				Description: "Chart name to be installed. A path may be used.",
 			},
 			"version": {
 				Type:        schema.TypeString,
@@ -158,7 +184,7 @@ func resourceRelease() *schema.Resource {
 			"verify": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["verify"],
 				Description: "Verify the package before installing it.",
 			},
 			"keyring": {
@@ -174,79 +200,85 @@ func resourceRelease() *schema.Resource {
 			"timeout": {
 				Type:        schema.TypeInt,
 				Optional:    true,
-				Default:     300,
+				Default:     defaultAttributes["timeout"],
 				Description: "Time in seconds to wait for any individual kubernetes operation.",
 			},
 			"disable_webhooks": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["disable_webhooks"],
 				Description: "Prevent hooks from running.",
 			},
 			"disable_crd_hooks": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["disable_crd_hooks"],
 				Description: "Prevent CRD hooks from, running, but run other hooks.  See helm install --no-crd-hook",
 			},
 			"reuse_values": {
 				Type:        schema.TypeBool,
 				Optional:    true,
 				Description: "When upgrading, reuse the last release's values and merge in any overrides. If 'reset_values' is specified, this is ignored",
-				Default:     false,
+				Default:     defaultAttributes["reuse_values"],
 			},
 			"reset_values": {
 				Type:        schema.TypeBool,
 				Optional:    true,
 				Description: "When upgrading, reset the values to the ones built into the chart",
-				Default:     false,
+				Default:     defaultAttributes["reset_values"],
 			},
 			"force_update": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["force_update"],
 				Description: "Force resource update through delete/recreate if needed.",
 			},
 			"recreate_pods": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["recreate_pods"],
 				Description: "Perform pods restart during upgrade/rollback",
 			},
 			"cleanup_on_fail": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["cleanup_on_fail"],
 				Description: "Allow deletion of new resources created in this upgrade when upgrade fails",
 			},
 			"max_history": {
 				Type:        schema.TypeInt,
 				Optional:    true,
-				Default:     0,
+				Default:     defaultAttributes["max_history"],
 				Description: "Limit the maximum number of revisions saved per release. Use 0 for no limit",
 			},
 			"atomic": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["atomic"],
 				Description: "If set, installation process purges chart on fail. The wait flag will be set automatically if atomic is used",
 			},
 			"skip_crds": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
+				Default:     defaultAttributes["skip_crds"],
 				Description: "If set, no CRDs will be installed. By default, CRDs are installed if not already present",
 			},
 			"render_subchart_notes": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     true,
+				Default:     defaultAttributes["render_subchart_notes"],
 				Description: "If set, render subchart notes along with the parent",
+			},
+			"disable_openapi_validation": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     defaultAttributes["disable_openapi_validation"],
+				Description: "If set, the installation process will not validate rendered templates against the Kubernetes OpenAPI Schema",
 			},
 			"wait": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     true,
+				Default:     defaultAttributes["wait"],
 				Description: "Will wait until all resources are in a ready state before marking the release as successful.",
 			},
 			"status": {
@@ -257,14 +289,37 @@ func resourceRelease() *schema.Resource {
 			"dependency_update": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
-				Description: "run helm dependency update before installing the chart",
+				Default:     defaultAttributes["dependency_update"],
+				Description: "Run helm dependency update before installing the chart",
 			},
 			"replace": {
 				Type:        schema.TypeBool,
 				Optional:    true,
-				Default:     false,
-				Description: "re-use the given name, even if that name is already used. This is unsafe in production",
+				Default:     defaultAttributes["replace"],
+				Description: "Re-use the given name, even if that name is already used. This is unsafe in production",
+			},
+			"description": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Description: "Add a custom description",
+				DiffSuppressFunc: func(k, old, new string, d *schema.ResourceData) bool {
+					return new == ""
+				},
+			},
+			"postrender": {
+				Type:        schema.TypeList,
+				MaxItems:    1,
+				Optional:    true,
+				Description: "Postrender command configuration.",
+				Elem: &schema.Resource{
+					Schema: map[string]*schema.Schema{
+						"binary_path": {
+							Type:        schema.TypeString,
+							Required:    true,
+							Description: "The command binary path.",
+						},
+					},
+				},
 			},
 			"metadata": {
 				Type:        schema.TypeList,
@@ -396,7 +451,6 @@ func resourceReleaseCreate(d *schema.ResourceData, meta interface{}) error {
 	client.ClientOnly = false
 	client.DryRun = false
 	client.DisableHooks = d.Get("disable_webhooks").(bool)
-	client.Replace = true
 	client.Wait = d.Get("wait").(bool)
 	client.Devel = d.Get("devel").(bool)
 	client.DependencyUpdate = updateDependency
@@ -409,20 +463,45 @@ func resourceReleaseCreate(d *schema.ResourceData, meta interface{}) error {
 	client.Atomic = d.Get("atomic").(bool)
 	client.SkipCRDs = d.Get("skip_crds").(bool)
 	client.SubNotes = d.Get("render_subchart_notes").(bool)
+	client.DisableOpenAPIValidation = d.Get("disable_openapi_validation").(bool)
 	client.Replace = d.Get("replace").(bool)
+	client.Description = d.Get("description").(string)
+
+	if cmd := d.Get("postrender.0.binary_path").(string); cmd != "" {
+		pr, err := postrender.NewExec(cmd)
+
+		if err != nil {
+			return err
+		}
+
+		client.PostRenderer = pr
+	}
 
 	debug("Installing Chart")
 
 	rel, err := client.Run(chart, values)
 
-	// Return error only if no release was created
-	// This will ensure we store even failed releases into the state
 	if err != nil && rel == nil {
 		return err
-	} else if err != nil && rel.Info.Status == release.StatusFailed {
+	}
+
+	if err != nil && rel != nil {
+		exists, existsErr := resourceReleaseExists(d, meta)
+
+		if existsErr != nil {
+			return existsErr
+		}
+
+		if !exists {
+			return err
+		}
+
+		debug("Release was created but returned an error")
+
 		if err := setIDAndMetadataFromRelease(d, rel); err != nil {
 			return err
 		}
+
 		return err
 	}
 
@@ -469,6 +548,17 @@ func resourceReleaseUpdate(d *schema.ResourceData, meta interface{}) error {
 	client.Recreate = d.Get("recreate_pods").(bool)
 	client.MaxHistory = d.Get("max_history").(int)
 	client.CleanupOnFail = d.Get("cleanup_on_fail").(bool)
+	client.Description = d.Get("description").(string)
+
+	if cmd := d.Get("postrender.0.binary_path").(string); cmd != "" {
+		pr, err := postrender.NewExec(cmd)
+
+		if err != nil {
+			return err
+		}
+
+		client.PostRenderer = pr
+	}
 
 	values, err := getValues(d)
 	if err != nil {
@@ -539,6 +629,7 @@ func resourceDiff(d *schema.ResourceDiff, meta interface{}) error {
 
 func setIDAndMetadataFromRelease(d *schema.ResourceData, r *release.Release) error {
 	d.SetId(r.Name)
+
 	if err := d.Set("version", r.Chart.Metadata.Version); err != nil {
 		return err
 	}
@@ -585,7 +676,7 @@ func resourceReleaseExists(d *schema.ResourceData, meta interface{}) (bool, erro
 		return true, nil
 	}
 
-	if err == ErrReleaseNotFound {
+	if err == errReleaseNotFound {
 		return false, nil
 	}
 
@@ -714,13 +805,12 @@ func getValues(d *schema.ResourceData) (map[string]interface{}, error) {
 }
 
 func getRelease(cfg *action.Configuration, name string) (*release.Release, error) {
-
 	get := action.NewGet(cfg)
 	res, err := get.Run(name)
 
 	if err != nil {
 		if strings.Contains(err.Error(), "release: not found") {
-			return nil, ErrReleaseNotFound
+			return nil, errReleaseNotFound
 		}
 
 		debug("could not get release %s", err)
@@ -776,4 +866,47 @@ func chartPathOptions(d resourceGetter, m *Meta) (*action.ChartPathOptions, stri
 		Username: d.Get("repository_username").(string),
 		Password: d.Get("repository_password").(string),
 	}, chartName, nil
+}
+
+func resourceHelmReleaseImportState(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+	namespace, name, err := parseImportIdentifier(d.Id())
+	if err != nil {
+		return nil, errors.Errorf("Unable to parse identifier %s: %s", d.Id(), err)
+	}
+
+	m := meta.(*Meta)
+
+	c, err := m.GetHelmConfiguration(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := getRelease(c, name)
+	if err != nil {
+		return nil, err
+	}
+
+	d.Set("name", r.Name)
+	d.Set("description", r.Info.Description)
+	d.Set("chart", r.Chart.Metadata.Name)
+
+	for key, value := range defaultAttributes {
+		d.Set(key, value)
+	}
+
+	if err := setIDAndMetadataFromRelease(d, r); err != nil {
+		return nil, err
+	}
+
+	return schema.ImportStatePassthrough(d, meta)
+}
+
+func parseImportIdentifier(id string) (string, string, error) {
+	parts := strings.Split(id, "/")
+	if len(parts) != 2 {
+		err := errors.Errorf("Unexpected ID format (%q), expected namespace/name", id)
+		return "", "", err
+	}
+
+	return parts[0], parts[1], nil
 }

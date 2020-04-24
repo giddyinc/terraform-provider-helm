@@ -48,12 +48,23 @@ resource "helm_release" "example" {
 }
 ```
 
+## Example Usage - Local Chart
+
+In case a Chart is not available from a repository, a path may be used:
+
+```hcl
+resource "helm_release" "local" {
+  name       = "my-local-chart"
+  chart      = "./charts/example"
+}
+```
+
 ## Argument Reference
 
 The following arguments are supported:
 
 * `name` - (Required) Release name.
-* `chart` - (Required) Chart name to be installed.
+* `chart` - (Required) Chart name to be installed. A path may be used.
 * `repository` - (Optional) Repository where to locate the requested chart. If is an URL the chart is installed without installing the repository.
 * `repository_key_file` - (Optional) The repositories cert key file
 * `repository_cert_file` - (Optional) The repositories cert file
@@ -65,7 +76,7 @@ The following arguments are supported:
 * `namespace` - (Optional) The namespace to install the release into. Defaults to `default`
 * `verify` - (Optional) Verify the package before installing it. Defaults to `false`
 * `keyring` - (Optional) Location of public keys used for verification. Used only if `verify` is true. Defaults to `/.gnupg/pubring.gpg` in the location set by `home`
-* `timeout` - (Optional) Time in seconds to wait for any individual kubernetes operation. Defaults to `300` seconds.
+* `timeout` - (Optional) Time in seconds to wait for any individual kubernetes operation (like Jobs for hooks). Defaults to `300` seconds.
 * `disable_webhooks` - (Optional) Prevent hooks from running. Defauts to `false`
 * `reuse_values` - (Optional) When upgrading, reuse the last release's values and merge in any overrides. If 'reset_values' is specified, this is ignored. Defaults to `false`.
 * `reset_values` - (Optional) When upgrading, reset the values to the ones built into the chart. Defaults to `false`.
@@ -76,6 +87,7 @@ The following arguments are supported:
 * `atomic` - (Optional) If set, installation process purges chart on fail. The wait flag will be set automatically if atomic is used. Defaults to `false`.
 * `skip_crds` - (Optional) If set, no CRDs will be installed. By default, CRDs are installed if not already present. Defaults to `false`.
 * `render_subchart_notes` - (Optional) If set, render subchart notes along with the parent. Defaults to `true`.
+* `disable_openapi_validation` - (Optional) If set, the installation process will not validate rendered templates against the Kubernetes OpenAPI Schema. Defaults to `false`.
 * `wait` - (Optional) Will wait until all resources are in a ready state before marking the release as successful. It will wait for as long as `timeout`. Defaults to `true`.
 * `values` - (Optional) List of values in raw yaml to pass to helm. Values will be merged, in order, as Helm does with multiple `-f` options.
 * `set` - (Optional) Value block with custom values to be merged with the values yaml.
@@ -83,11 +95,17 @@ The following arguments are supported:
 * `set_string` - (Optional) Value block with custom STRING values to be merged with the values yaml.
 * `dependency_update` - (Optional) Runs helm dependency update before installing the chart. Defaults to `false`.
 * `replace` - (Optional) Re-use the given name, even if that name is already used. This is unsafe in production. Defaults to `false`.
+* `description` - (Optional) Set release description attribute (visible in the history).
+* `postrender` - (Optional) Configure a command to run after helm renders the manifest which can alter the manifest contents.
 
 The `set`, `set_sensitive` and `set_strings` blocks support:
 
 * `name` - (Required) full name of the variable to be set.
 * `value` - (Required) value of the variable to be set.
+
+The `postrender` block supports a single attribute:
+
+* `binary_path` - (Required) relative or full path to command binary.
 
 
 ## Attributes Reference
@@ -109,4 +127,10 @@ The `metadata` block supports:
 
 ## Import
 
-`helm_release` does not support import yet.
+A Helm Release resource can be imported using its namespace and name e.g.
+
+```
+$ terraform import helm_release.example default/example-name`
+```
+
+~> **NOTE:** Since the `repository` attribute is not being persisted as metadata by helm, it will not be set to any value by default. All other provider specific attributes will be set to their default values and they can be overriden after running `apply` using the resource definition configuration.

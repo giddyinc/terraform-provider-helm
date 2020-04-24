@@ -1,4 +1,19 @@
-## 1.0.1 (Unreleased)
+## 1.1.1 (March 26, 2020)
+FIXES:
+* Fix chart path bug causing unwanted diff (#449)
+
+## 1.1.0 (March 19, 2020)
+IMPROVEMENTS:
+* Add import feature for helm_release (#394)
+* Run acceptance tests in travis-ci using kind
+* Upgrade helm to version v3.1.2 (#440)
+* Add description attribute
+* Add post-rendering support
+
+FIXES:
+* Fix errors being swallowed when creating a helm_release (#406)
+* Various documentation fixes
+
 ## 1.0.0 (February 05, 2020)
 BREAKING CHANGES:
 * No longer supports helm v2 (#378)
